@@ -43,7 +43,7 @@
 
     // Settings for the deepl API
     deeplSettings: {
-        auth_key: "", //Your Deepl Auth Key 
+        auth_key: "a3302ade-f68d-4c74-90ab-44e02c5c023c", //Your Deepl Auth Key 
         hostname: 'https://api.deepl.com',
         ignore_tag: "lang-ignore",
         port: 443,

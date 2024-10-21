@@ -1,11 +1,15 @@
-﻿var querystring = require('querystring');
+var querystring = require('querystring');
 var cheerio = require('cheerio');
 var fs = require('fs');
 var os = require("os");
-var args = require('yargs').array('target').argv;
+var args = require('yargs').string('source').array('target').argv;
 var settings;
 if(fs.existsSync('./settings_copy.js')){
     settings = require('./settings_copy.js');
+    if(args.source && args.target) {
+        settings.translateTo = Array.isArray(args.target) ? args.target : (args.target ? args.target.split(',').map(lang => lang.trim()) : []);
+        settings.defaultLanguage = args.source;
+    }
 }
 else{
     settings = require('./settings');
@@ -20,8 +24,6 @@ var jsonLangFromLoadedFile = {}; // Will contain the same as above, but from the
 var curVersion = 1;
 var newVersion = 1;
 var report = "\nDefault language: " + settings.defaultLanguage;
-
-console.log('BEFORE READ ALL');
 
 /*
  * Start with node LangParserTranslator --job=parseonly/deeplForMoney --source=en --target=de (fr, es, etc OR: all for all languages!!)
@@ -49,36 +51,27 @@ if(args.job != "parseonly" && args.job != "DEEPLCOSTSMONEY" ){
     process.exit(1);
 }
 
-console.log('BEFORE READ ALL');
+
+console.log('HERE IS ARGS: ', settings.defaultLanguage, 'AND TO: ', settings.translateTo);
 
 /*
     1. step: Get the default language into memory from the HTML files
 */
-let langSource
-if (args.source && args.target) {
-    langSource = args.source
-    jsonLangFromParsed[args.source] = parseHtmlFiles();
-} else {
-    langSource = settings.defaultLanguage
-    jsonLangFromParsed[settings.defaultLanguage] = parseHtmlFiles();
-}
 
-
+jsonLangFromParsed[settings.defaultLanguage] = parseHtmlFiles();
 
 /*
 *   2. step: If the default language JSON language file does not exist, create it now, ELSE load it
 */
 
 var jsonLangFile = {};
-jsonLangFile["default"] = getJsonFilename(langSource);
-jsonLangFile[langSource] = jsonLangFile["default"];
-
-console.log('E X S I S T :', jsonLangFile["default"]);
+jsonLangFile["default"] = getJsonFilename(settings.defaultLanguage);
+jsonLangFile[settings.defaultLanguage] = jsonLangFile["default"];
 
 if (!fs.existsSync(jsonLangFile["default"])) {
-    jsonLangFromParsed[langSource]["___version"] = 1;
+    jsonLangFromParsed[settings.defaultLanguage]["___version"] = 1;
     fs.writeFileSync(jsonLangFile["default"], 
-        stringifyLang(langSource, jsonLangFromParsed[langSource]),
+        stringifyLang(settings.defaultLanguage, jsonLangFromParsed[settings.defaultLanguage]),
         function(err) {
             if (err) {
                 return console.log("Error in step 2: " + err);
@@ -88,22 +81,19 @@ if (!fs.existsSync(jsonLangFile["default"])) {
 }
 
 var temp = fs.readFileSync(jsonLangFile["default"], 'utf8');
-jsonLangFromLoadedFile[langSource] = temp.toString().replace("EasyRadiology_Language[\"" + langSource + "\"] = ", "");
-
-console.log('JSOON: ', jsonLangFromLoadedFile[langSource]);
+jsonLangFromLoadedFile[settings.defaultLanguage] = temp.toString().replace("EasyRadiology_Language[\"" + settings.defaultLanguage + "\"] = ", "");
+    
 
 
 /*
 *   3. step: If translate is enabled, also load all languages and create the jsonLangFromParsed[curLang] object and fill it, if js file present
 */
-console.log('BEFORE READ ALL');
-if(args.job == "DEEPLCOSTSMONEY" && !args.source && !args.target){
-    readAllJsonFiles(1);
 
-} else if (args.job == "DEEPLCOSTSMONEY" && args.source && args.target) {
-    readAllJsonFiles(0);
+if(args.job == "DEEPLCOSTSMONEY"){
+    readAllJsonFiles();
+
 }
-console.log('AFTER READ ALL');
+
 /*
 *   4. step: Get changes. If none, exit. Else either just parse newly or 
         translate
@@ -111,13 +101,13 @@ console.log('AFTER READ ALL');
 
 trackChanges();
 if (changes.length > 0 ) {
-    curVersion = parseInt(jsonLangFromLoadedFile[langSource]["___version"]);
+    curVersion = parseInt(jsonLangFromLoadedFile[settings.defaultLanguage]["___version"]);
     newVersion = curVersion++;
-    jsonLangFromParsed[langSource]["___version"] = newVersion;
+    jsonLangFromParsed[settings.defaultLanguage]["___version"] = newVersion;
 
     // Write the default language file, if there are changes
     fs.writeFileSync(jsonLangFile["default"],
-    stringifyLang(langSource, jsonLangFromParsed[langSource]),
+    stringifyLang(settings.defaultLanguage, jsonLangFromParsed[settings.defaultLanguage]),
     function(err) {
 
         if (err) {
@@ -125,41 +115,28 @@ if (changes.length > 0 ) {
         }
     });
 
-    console.log("\nParsing finished. A new default language file (language: " + langSource + " was written!");
+    console.log("\nParsing finished. A new default language file (language: " + settings.defaultLanguage + " was written!");
    
 }
 
-// if(args.job == "DEEPLCOSTSMONEY"){
-//     translateToAllLanguages();
-// }
-if(args.job == "DEEPLCOSTSMONEY" && !args.source && !args.target){
-    translateToAllLanguages(1);
-
-} else if (args.job == "DEEPLCOSTSMONEY" && args.source && args.target) {
-    translateToAllLanguages(0);
+if(args.job == "DEEPLCOSTSMONEY"){
+    translateToAllLanguages();
 }
 else if(changes.length == 0){
     console.log("\nNothing to do, the texts in the existing JSON file is the same as the HTML files");
     process.exit(0);
 }
 
-function readAllJsonFiles(mode){
-    let translateToLang
-    if(mode) {
-        translateToLang = settings.translateTo;
-    } else {
-        translateToLang = Array.isArray(args.target) ? args.target : (args.target ? args.target.split(',').map(lang => lang.trim()) : []);
-    }
+function readAllJsonFiles(){
     //Cycle through all languages
-    for (var i = 0; i < translateToLang.length; i++) {
+    for (var i = 0; i < settings.translateTo.length; i++) {
 
-        var curLang = translateToLang[i];
+        var curLang = settings.translateTo[i];
         if(!settings.availableLanguages.includes(curLang)){
             continue;
         }
         jsonLangFromLoadedFile[curLang] = {};
-        var pathToLangFile = getJsonFilename(args.source);
-        console.log('FILE EXIST', pathToLangFile)
+        var pathToLangFile = getJsonFilename(curLang);
         if (fs.existsSync(pathToLangFile)) { //If it exists, load it
             try{
                 var json = fs.readFileSync(pathToLangFile, 'utf8');
@@ -187,78 +164,57 @@ function readAllJsonFiles(mode){
     }
 }
 
-async function translateToAllLanguages(mode) {
-    console.log('RUNNED IN MODE: ', mode);
-    let translateFromLang
-    let translateToLang
-    if(mode) {
-        translateToLang = settings.translateTo;
-        translateFromLang = settings.defaultLanguage;
-    } else {
-        translateToLang = Array.isArray(args.target) ? args.target : (args.target ? args.target.split(',').map(lang => lang.trim()) : []);
-        translateFromLang = args.source;
-    }
-    console.log('FROM AND TO: ', translateFromLang, translateToLang);
+async function translateToAllLanguages() {
+
     // Cycle through all languages
-    for (var i = 0; i < translateToLang.length; i++) {
+    for (var i = 0; i < settings.translateTo.length; i++) {
         var translationCounter = 0;
-        console.log('FROM AND TO: ', translateToLang[i], translateFromLang);
-        var curLang = translateToLang[i];
-        // Additional logging for debugging
-        console.log('Current Language: ', curLang);
-        console.log('Source Language: ', translateFromLang);
-        console.log('Available Languages: ', settings.availableLanguages);
-        if(curLang == translateFromLang || !settings.availableLanguages.includes(curLang)){
+
+        var curLang = settings.translateTo[i];
+        if(curLang == settings.defaultLanguage || !settings.availableLanguages.includes(curLang)){
             continue; // Skip the default lang
         }
-        console.log('GOOO', jsonLangFromParsed[curLang])
+        
         var promises = {};
         promises[curLang] = []; 
 
         // Go through all keys of the default language, from the freshly parsed
-        for (var key in jsonLangFromParsed[curLang]) {
+        for (var key in jsonLangFromParsed[settings.defaultLanguage]) {
             if (jsonLangFromLoadedFile[curLang] &&
                 jsonLangFromLoadedFile[curLang].hasOwnProperty(key) &&
                 (!changes.includes(key) || jsonLangFromLoadedFile[curLang][key].indexOf(settings.ignoreInJson) !== -1  )) { // If the other lang has also the same key as English, lets check, if anything was changed
                 continue; // Nothing to translate
             }
-            console.log('RUNNED IN MODE:2 ', jsonLangFromParsed[curLang][key]);
             translationCounter++;
             // Push that in the "TODO array"
-            promises[curLang].push(translateText(key, jsonLangFromParsed[curLang][key], curLang));
+            promises[curLang].push(translateText(key, jsonLangFromParsed[settings.defaultLanguage][key], curLang));
             
         }
 
 
         // Send off all the texts to be translated and write the language file
         try{
-            console.log('Its moving on', promises[curLang])
             if(promises[curLang].length > 0){
                 var res = await Promise.all(promises[curLang])
                 jsonLangFromParsed[curLang]["___version"] = newVersion; 
                 var counter = 0;   
-                for (var key in jsonLangFromParsed[curLang]) {
+                for (var key in jsonLangFromParsed[settings.defaultLanguage]) {
                     if (jsonLangFromLoadedFile[curLang].hasOwnProperty(key) && !changes.includes(key) || key=="___version") { // If the other lang has also the same key as English, lets check, if anything was changed
                         continue; // Nothing to translate
                     }
                     if(!counter in res || res[counter] == "undefined"){
-                        report += "\nError in Key: \"" + key + "\" - " + translateFromLang + ": " + jsonLangFromParsed[curLang][key] 
+                        report += "\nError in Key: \"" + key + "\" - " + settings.defaultLanguage + ": " + jsonLangFromParsed[settings.defaultLanguage][key] 
                         + curLang; 
                         continue;
         
-                    } else if (counter >= res.length || !res[counter]) {
-                        console.log("Error: No response for key: " + key + " in language: " + curLang);
-                        continue;
                     }
         
         
-                    if (!res[counter] || !res[counter].data || !res[counter].data.translations || res[counter].data.translations.length === 0) {
-                        console.log("\nNo valid translation data for key: " + key + " in language: " + curLang);
-                        continue;
+                    if(res[counter] == "undefined" || res[counter]["data"] == "undefined"){
+                        console.log("\ndata is undefined for key: " + key + " in language: " + curLang);
                     }
-                    
         
-                    report += "\nKey: \"" + key + "\" - " + translateFromLang + ": " + jsonLangFromParsed[curLang][key] 
+                    report += "\nKey: \"" + key + "\" - " + settings.defaultLanguage + ": " + jsonLangFromParsed[settings.defaultLanguage][key] 
                     + " / " + curLang + ": " + res[counter]["data"]["translations"][0]["text"]; 
         
                     jsonLangFromParsed[curLang][key] = res[counter]["data"]["translations"][0]["text"]; 
@@ -306,12 +262,6 @@ async function translateToAllLanguages(mode) {
 
 async function translateText(key, text, targetLanguage)
 {
-    let langFrom
-    if(args.source) {
-        langFrom = args.source
-    } else {
-        langFrom = settings.defaultLanguage
-    }
     if(key ==="___version" || (typeof text !== 'string')){
         return;
     }
@@ -321,7 +271,7 @@ async function translateText(key, text, targetLanguage)
     }
     var obj = {
         "target_lang" : targetLanguage.toUpperCase(),
-        "source_lang" : langFrom.toUpperCase(),
+        "source_lang" : settings.defaultLanguage.toUpperCase(),
         "text" : text
     }
     
@@ -343,13 +293,8 @@ function stringifyLang(language, obj){
  *
  */
 function trackChanges() {
-    let langFrom
-    if(args.source) {
-        langFrom = args.source
-    } else {
-        langFrom = settings.defaultLanguage
-    }
-    enJson = jsonLangFromLoadedFile[langFrom].replace("EasyRadiology_Language[\"en\"] = ", "");
+
+    enJson = jsonLangFromLoadedFile[settings.defaultLanguage].replace("EasyRadiology_Language[\"en\"] = ", "");
     try{
         var def = JSON.parse(enJson);
     }
@@ -358,10 +303,9 @@ function trackChanges() {
         console.log(e);
         process.exit(1);
     }
-    for (var key in jsonLangFromParsed[langFrom]) {
+    for (var key in jsonLangFromParsed[settings.defaultLanguage]) {
         if (def.hasOwnProperty(key)) {
-            console.log("Changes hasOwnProperty: " + key);
-            if (jsonLangFromParsed[langFrom][key] === def[key] || key == "___version") {
+            if (jsonLangFromParsed[settings.defaultLanguage][key] === def[key] || key == "___version") {
                 continue;
             }
 
@@ -379,17 +323,9 @@ function trackChanges() {
  */
 
 function parseHtmlFiles() {
-    console.log('PARSER', args.html);
     var langObj = {};
     for (var i = 0; i < settings.htmlWithLang.length; i++) {
-
-        var temp
-        if (args.html) {
-            temp = parseArgFile('/app/temp_html.html');
-        } else {
-            temp = parseFile(settings.commonPathOfHtmlFiles + settings.htmlWithLang[i]);
-        }
-         
+        var temp = parseFile(settings.commonPathOfHtmlFiles + settings.htmlWithLang[i]);
         for (var key in temp){
             langObj[key] = temp[key];
         }
@@ -419,27 +355,3 @@ function parseFile(file) {
 
     return toLangObj;
 }
-
-function parseArgFile(Content) {
-    var toLangObj = {};
-
-    fileContent = fs.readFileSync(Content, 'utf8');  // fileOrContent is HTML content passed as a string
-
-    var $ = cheerio.load(fileContent);
-    
-    // Parse HTML elements with the specified lang attribute
-    $("[" + settings.langAttribute + "]").each(function (i, elem) {
-        var langItem = $(this).html();
-        langItem = langItem.replace(/^[\s]{2,}|[\s]{2,}$/gm, " "); // Replace multiple spaces with 1 space
-        langItem = langItem.replace(/(?:\r\n|\r|\n|\t)/gm, ''); // Replace line breaks or tabs of the HTML code with nothing
-        
-        langItem = entities.decode(langItem);
-
-        toLangObj[$(this).attr(settings.langAttribute)] = langItem;
-    });
-
-    return toLangObj;
-}
-
-
-
